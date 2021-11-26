@@ -8,6 +8,8 @@ namespace MatLib {
 	public:
 		Interpreter() = default;
 		Interpreter(Parser* parser);
+
+		double SolveExpression(Ast_Expression* expr);
 	protected:
 		Parser* parser; 
 	};

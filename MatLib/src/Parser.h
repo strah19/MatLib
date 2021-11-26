@@ -38,9 +38,7 @@ namespace MatLib {
 	};
 
 	enum {
-		AST_UNARY_PLUS,
 		AST_UNARY_MINUS,
-		AST_UNARY_NESTED,
 		AST_UNARY_NONE
 	};
 
@@ -64,13 +62,6 @@ namespace MatLib {
 
 	struct Ast_Expression : public Ast {
 		Ast_Expression() { type = AST_EXPRESSION; }
-		~Ast_Expression() { delete next; }
-
-		Ast_Expression* next = nullptr;
-
-		Ast_Expression(const Ast_Expression& expr) {
-			next = expr.next;
-		}
 	};
 
 	struct Ast_PrimaryExpression : public Ast_Expression {
@@ -80,10 +71,12 @@ namespace MatLib {
 		double num_const = 0.0;
 		Ast_Identifier* ident = nullptr;
 		Ast_ProcedureCall* call = nullptr;
+		Ast_Expression* nested = nullptr;
 	};
 
 	struct Ast_BinaryExpression : public Ast_Expression {
 		Ast_BinaryExpression() { type = AST_BINARY; }
+		Ast_BinaryExpression(Ast_Expression* left, int op, Ast_Expression* right) : left(left), op(op), right(right) { type = AST_BINARY; }
 		~Ast_BinaryExpression() { delete left; delete right; }
 
 		int op = AST_OPERATOR_NONE;
@@ -100,7 +93,9 @@ namespace MatLib {
 
 	struct Ast_UnaryExpression : public Ast_Expression {
 		Ast_UnaryExpression() { type = AST_UNARY; }
+		Ast_UnaryExpression(Ast_Expression* next, int op) : op(op), next(next) { type = AST_UNARY; }
 
+		Ast_Expression* next = nullptr;
 		int op = AST_UNARY_NONE;
 	};
 
@@ -130,9 +125,12 @@ namespace MatLib {
 		std::vector<Ast_Statement*> procedures;
 	};
 
-#define START 0
-#define LEFT 1
-#define RIGHT 2
+#define AST_NEW(type) \
+    static_cast<type*>(DefaultAst(new type))
+
+#define AST_DELETE(type) delete type
+
+#define AST_CAST(type, base) static_cast<type*>(base)
 
 	class Parser {
 	public:
@@ -149,21 +147,26 @@ namespace MatLib {
 		Ast* DefaultAst(Ast* ast);
 		Token* Peek();
 		Token* PeekOff(int off);
-		Token* Next();
-		void Match(int type);
+		Token* Advance();
+		Token* Previous();
+		bool AtEnd();
+		bool Match(int type);
+		bool Check(int type);
+		Ast_Script* Root() { return root; }
 	private:
 		std::vector<std::unordered_map<Ast_Identifier, double>> symbols;
 		Lexer* lexer = nullptr;
 		Ast_Script* root = nullptr;
-		uint32_t index = 0;
+		uint32_t token_index = 0;
 	private:
 		Ast_Statement* ParseStatement();
 		Ast_Identifier* ParseId();
-		Ast_Expression* ParseExpression(int prec = 1);
+		Ast_Expression* ParseExpression();
 		Ast_Expression* ParseUnary();
 		Ast_Expression* ParsePrimary();
-		Ast_BinaryExpression* ParseBinary();
+		Ast_Expression* ParseFactor();
 		Ast_ProcedureCall* ParseProcedureCall();
+		int TokenTypeToAstType(Token* token);
 	};
 }
 

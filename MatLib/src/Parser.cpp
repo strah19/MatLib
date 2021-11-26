@@ -2,57 +2,31 @@
 #include "Logger.h"
 
 namespace MatLib {
-#define AST_NEW(type) \
-    static_cast<type*>(DefaultAst(new type))
-
-#define AST_DELETE(type) delete type
-
-#define AST_CAST(type, base) static_cast<type*>(base)
-
-	static std::map<int, int> precedences;
-
 	Parser::Parser(Lexer* lexer) {
-		precedences[Tok::T_PLUS] = 1;
-		precedences[Tok::T_MINUS] = 1;
-		precedences[Tok::T_STAR] = 2;
-		precedences[Tok::T_SLASH] = 2;
-
 		this->lexer = lexer;
+	}
+
+	int Parser::TokenTypeToAstType(Token* token) {
+		switch (token->type) {
+		case Tok::T_PLUS:
+			return AST_OPERATOR_ADD;
+		case Tok::T_MINUS:
+			return AST_OPERATOR_SUB;
+		case Tok::T_STAR:
+			return AST_OPERATOR_MULTIPLICATIVE;
+		case Tok::T_SLASH:
+			return AST_OPERATOR_DIVISION;
+		}
+		return AST_OPERATOR_NONE;
 	}
 
 	Ast_Identifier* Parser::ParseId() {
 		auto id = AST_NEW(Ast_Identifier);
-		id->id = Next()->id;
+		if (Peek()->type = Tok::T_IDENTIFIER)
+			id->id = Advance()->id;
+		else
+			id = nullptr;
 		return id;
-	}
-
-	Ast_Expression* Parser::ParseUnary() {
-		auto unary = AST_NEW(Ast_UnaryExpression);
-		switch (Peek()->type) {
-		case Tok::T_PLUS: {
-			Match(Tok::T_PLUS);
-			unary->op = AST_UNARY_PLUS;
-			break;
-		}
-		case Tok::T_MINUS: {
-			Match(Tok::T_MINUS);
-			unary->op = AST_UNARY_MINUS;
-			break;
-		}
-		case Tok::T_LPAR: {
-			Match(Tok::T_LPAR);
-			unary->op = AST_UNARY_NESTED;
-			//Run parse_expression here to parse the expression in the ()
-			break;
-		}
-		default: {
-			AST_DELETE(unary);
-			return ParsePrimary();
-		}
-		}
-
-		unary->next = ParseUnary();
-		return unary;
 	}
 
 	Ast_Expression* Parser::ParsePrimary() {
@@ -67,6 +41,13 @@ namespace MatLib {
 			prime->ident = ParseId();
 			break;
 		}
+		case Tok::T_LPAR: {
+			Match(Tok::T_LPAR);
+			auto expr = ParseExpression();
+			Match(Tok::T_RPAR);
+			prime->nested = expr;
+			break;
+		}
 		default: {
 			AST_DELETE(prime);
 			return nullptr;
@@ -75,53 +56,34 @@ namespace MatLib {
 		return prime;
 	}
 
-	Ast_BinaryExpression* Parser::ParseBinary() {
-		auto expr = AST_NEW(Ast_BinaryExpression);
-		switch (Peek()->type) {
-		case Tok::T_STAR:
-			expr->op = AST_OPERATOR_MULTIPLICATIVE;
-			Match(Tok::T_STAR);
-			break;
-		case Tok::T_PLUS:
-			expr->op = AST_OPERATOR_ADD;
-			Match(Tok::T_PLUS);
-			break;
-		case Tok::T_MINUS:
-			expr->op = AST_OPERATOR_SUB;
-			Match(Tok::T_MINUS);
-			break;
-		case Tok::T_SLASH:
-			expr->op = AST_OPERATOR_DIVISION;
-			Match(Tok::T_SLASH);
-			break;
-		case Tok::T_PERCENT:
-			expr->op = AST_OPERATOR_MODULO;
-			Match(Tok::T_PERCENT);
-			break;
-		case Tok::T_LARROW:
-			expr->op = AST_OPERATOR_LT;
-			Match(Tok::T_LARROW);
-			break;
-		case Tok::T_RARROW:
-			expr->op = AST_OPERATOR_GT;
-			Match(Tok::T_RARROW);
-			break;
-		case Tok::T_DOUBLE_EQUAL:
-			expr->op = AST_OPERATOR_COMPARITIVE_EQUAL;
-			Match(Tok::T_DOUBLE_EQUAL);
-			break;
-		case Tok::T_LTE:
-			expr->op = AST_OPERATOR_LTE;
-			Match(Tok::T_LTE);
-			break;
-		case Tok::T_GTE:
-			expr->op = AST_OPERATOR_GTE;
-			Match(Tok::T_GTE);
-			break;
-		case Tok::T_NOT:
-			expr->op = AST_OPERATOR_COMPARITIVE_NOT_EQUAL;
-			Match(Tok::T_NOT);
-			break;
+	Ast_Expression* Parser::ParseUnary() {
+		if (Match(Tok::T_MINUS)) {
+			Ast_Expression* right = ParseUnary();
+			return new Ast_UnaryExpression(right, AST_UNARY_MINUS);
+		}
+
+		return ParsePrimary();
+	}
+
+	Ast_Expression* Parser::ParseFactor() {
+		auto expr = ParseUnary();
+
+		while (Match(Tok::T_SLASH) || Match(Tok::T_STAR)) {
+			Token* op = Previous();
+			auto right = ParseUnary();
+			expr = new Ast_BinaryExpression(expr, TokenTypeToAstType(op), right);
+		}
+
+		return expr;
+	}
+
+	Ast_Expression* Parser::ParseExpression() {
+		auto expr = ParseFactor();
+
+		while (Match(Tok::T_MINUS) || Match(Tok::T_PLUS)) {
+			auto t = Previous();
+			auto right = ParseFactor();
+			expr = new Ast_BinaryExpression(expr, TokenTypeToAstType(t), right);
 		}
 
 		return expr;
@@ -130,52 +92,6 @@ namespace MatLib {
 	Ast_ProcedureCall* Parser::ParseProcedureCall() {
 		return nullptr;
 
-	}
-	/*
-	Ast_Expression* Parser::ParseExpression() {
-		auto lexpr = ParseUnary();
-
-		auto expr = ParseBinary();
-
-		if (expr->op == AST_OPERATOR_NONE) {
-			AST_DELETE(expr);
-			return lexpr;
-		}
-
-		expr->left = lexpr;
-		expr->right = ParseExpression();
-
-		return expr;
-	}
-	*/
-
-
-	Ast_Expression* Parser::ParseExpression(int prec) {
-		Ast_BinaryExpression* bin = AST_NEW(Ast_BinaryExpression);
-		while (Peek()->type != Tok::T_NEWLINE) {
-			auto lexpr = ParseUnary();
-			if (precedences[Peek()->type] >= prec) {
-				auto b = ParseBinary(); 
-				if (b) {
-					bin->op = b->op;
-					bin->right = ParseExpression(precedences[PeekOff(-1)->type] + 1);
-					if (lexpr != nullptr)
-						bin->left = lexpr;
-
-					if (Peek()->type == Tok::T_NEWLINE) break;
-
-					auto temp = AST_NEW(Ast_BinaryExpression);
-					temp->left = bin;
-					bin = temp;
-				}
-			}
-			else {
-				AST_DELETE(bin);
-				return lexpr;
-			}
-		}	
-
-		return bin;
 	}
 
 	Ast_Statement* Parser::ParseStatement() {
@@ -197,14 +113,14 @@ namespace MatLib {
 		}
 		else {
 			EMBER_LOG_ERROR("Expected an identifier for statement.");
-			Next();
+			Advance();
 		}
 
 		return nullptr;
 	}
 
 	void Parser::Run() {
-		index = 0;
+		token_index = 0;
 		root = AST_NEW(Ast_Script);
 
 		while (Peek()->type != Tok::T_EOF) {
@@ -215,21 +131,36 @@ namespace MatLib {
 	}
 
 	Token* Parser::Peek() {
-		return (index < lexer->Tokens().size()) ? &lexer->Tokens()[index] : nullptr;
+		return (!AtEnd()) ? &lexer->Tokens()[token_index] : nullptr;
 	}
 
 	Token* Parser::PeekOff(int off) {
-		return (index + off < lexer->Tokens().size()) ? &lexer->Tokens()[index + off] : nullptr;
+		return (token_index + off < lexer->Tokens().size()) ? &lexer->Tokens()[token_index + off] : nullptr;
 	}
 
-	Token* Parser::Next() {
-		return (index < lexer->Tokens().size()) ? &lexer->Tokens()[index++] : nullptr;
+	Token* Parser::Advance() {
+		return (!AtEnd()) ? &lexer->Tokens()[token_index++] : nullptr;
 	}
 
-	void Parser::Match(int type) {
-		if (Peek()->type != type)
-			EMBER_LOG_ERROR("Expected '%d' on line %d.", type, Peek()->line);
-		Next();
+	bool Parser::Match(int type) {
+		if (!Check(type)) {
+			return false;
+		}
+		Advance();
+		return true;
+	}
+
+	bool Parser::Check(int type) {
+		if (AtEnd())  return false;
+		return (Peek()->type == type);
+	}
+
+	Token* Parser::Previous() {
+		return &lexer->Tokens()[token_index - 1];
+	}
+
+	bool Parser::AtEnd() {
+		return !(token_index < lexer->Tokens().size());
 	}
 
 	Ast* Parser::DefaultAst(Ast* ast) {
@@ -277,7 +208,12 @@ namespace MatLib {
 			case AST_PRIMARY: {
 				auto p = AST_CAST(Ast_PrimaryExpression, expr);
 				Ident(indent);
-				printf("Primary: %f\n", p->num_const);
+				if (p->nested) {
+					printf("Nested: \n");
+					VisualizeExpression(p->nested, indent + 1);
+				}
+				else
+					printf("Primary: %f\n", p->num_const);
 				break;
 			}
 			case AST_BINARY: {
